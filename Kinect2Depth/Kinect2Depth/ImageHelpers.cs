@@ -13,18 +13,18 @@ namespace Kinect2Depth
 {
     public static class ImageHelpers
     {
-        private const int MaxDepthDistance = 4000;
-        private const int MinDepthDistance = 850;
+        private const int MaxDepthDistance =4000;
+        private const int MinDepthDistance = 500;
         private const int MaxDepthDistanceOffset = 3150;
 
-        public static BitmapSource SliceDepthImage(this DepthImageFrame image, int min = 20, int max = 1000)
+        public static BitmapSource SliceDepthImage(this MultiSourceFrame image, int min = 20, int max = 1000)
         {
-            int width = image.Width;
-            int height = image.Height;
+            int width  = image.DepthFrameReference.AcquireFrame().FrameDescription.Width;
+            int height = image.DepthFrameReference.AcquireFrame().FrameDescription.Height;
 
             //var depthFrame = image.Image.Bits;
-            short[] rawDepthData = new short[image.PixelDataLength];
-            image.CopyPixelDataTo(rawDepthData);
+            ushort[] rawDepthData = new ushort[width*height];
+            image.DepthFrameReference.AcquireFrame().CopyFrameDataToArray(rawDepthData);
            
             var pixels = new byte[height * width * 4];
           
@@ -38,7 +38,7 @@ namespace Kinect2Depth
             {
 
                 // Calculate the distance represented by the two depth bytes
-                int depth = rawDepthData[depthIndex] >> DepthImageFrame.PlayerIndexBitmaskWidth;
+                int depth = rawDepthData[depthIndex];
 
                 // Map the distance to an intesity that can be represented in RGB
                 var intensity = CalculateIntensityFromDistance(depth);

@@ -24,10 +24,10 @@
             <TextBlock x:Name="txtError" Grid.Row="1" Text="No Kinect Found" Visibility="Collapsed" FontFamily="{StaticResource KinectFontLight}" Foreground="#ccc" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" Grid.ColumnSpan="2"/>
 
             <Viewbox Margin="15 0 10 15" Grid.Row="1" Stretch="Uniform" x:Name="outputViewbox"  Grid.ColumnSpan="2" >
-                <Image Name="outImg" Width="640" Height="480" RenderTransformOrigin="0.5,0.5" />
+                <Image Name="outImg" Width="640" Height="530" RenderTransformOrigin="0.5,0.5" />
             </Viewbox>
 
-            <Image Name="colorImg" Width="160" Height="120" Grid.Row="1" Grid.ColumnSpan="2" Stretch="Uniform" RenderTransformOrigin="0.5,0.5" Margin="0 2 12 0" HorizontalAlignment="Right" VerticalAlignment="Top" />
+            <Image Name="colorImg" Width="160" Height="90" Grid.Row="1" Grid.ColumnSpan="2" Stretch="Uniform" RenderTransformOrigin="0.5,0.5" Margin="0 2 12 0" HorizontalAlignment="Right" VerticalAlignment="Top" />
 
             <StackPanel  Margin="0 0 15 15" Width="300" Background="#f0f0f0" HorizontalAlignment="Right" Grid.Column="2" Grid.Row="1" >
                 <TextBlock Text="Settings"  Padding="10" Background="#ccc" />

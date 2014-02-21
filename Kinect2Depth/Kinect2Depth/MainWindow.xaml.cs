@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -24,131 +25,179 @@ namespace Kinect2Depth
     /// </summary>
     public partial class MainWindow : Window
     {
-        KinectSensor sensor;
-        WriteableBitmap depthBitmap;
-        WriteableBitmap colorBitmap;
-        DepthImagePixel[] depthPixels;
-        byte[] colorPixels;
+        /// <summary>
+        /// Active Kinect sensor
+        /// </summary>
+        private KinectSensor kinectSensor = null;
+        private WriteableBitmap depthBitmap = null;
+        private WriteableBitmap colorBitmap = null;
+        //DepthImagePixel[] depthPixels;
+        /// <summary>
+        /// Size of the RGB pixel in the bitmap
+        /// </summary>
+        private readonly int cbytesPerPixel = (PixelFormats.Bgr32.BitsPerPixel + 7) / 8;
+        /// <summary>
+        /// Size of the RGB pixel in the bitmap
+        /// </summary>
+        private readonly int bytesPerPixel = (PixelFormats.Bgr32.BitsPerPixel + 7) / 8;
+
+        private BitmapSource depthbmSource = null;
+        private BitmapSource colorbmSource = null;
+
+        private MultiSourceFrameReader reader = null;
+        private ushort[] frameData = null;
+        private byte[] depthColorPixels = null;
+        private byte[] rgbColorPixels = null;
 
         int blobCount = 0;
 
         public MainWindow()
         {
-            InitializeComponent();
 
+            // initialize the components (controls) of the window
+            this.InitializeComponent();
             this.Loaded += MainWindow_Loaded;
             this.Closing += MainWindow_Closing;
-            this.MouseDown += MainWindow_MouseDown;
-
+            this.MouseDown += MainWindow_MouseDown;           
         }
 
 
-        void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Execute start up tasks
+        /// </summary>
+        /// <param name="sender">object sending the event</param>
+        /// <param name="e">event arguments</param>
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            // Only one sensor currently supported
+            this.kinectSensor = KinectSensor.Default;
 
-            foreach (var potentialSensor in KinectSensor.KinectSensors)
+            if (this.kinectSensor != null)
             {
-                if (potentialSensor.Status == KinectStatus.Connected)
+                FrameDescription depthFrameDescription = this.kinectSensor.DepthFrameSource.FrameDescription;
+                FrameDescription colorFrameDescription = this.kinectSensor.ColorFrameSource.FrameDescription;
+
+                // open the sensor
+                this.kinectSensor.Open();
+
+                this.reader = this.kinectSensor.OpenMultiSourceFrameReader(FrameSourceTypes.Depth | FrameSourceTypes.Color | FrameSourceTypes.BodyIndex);
+
+                // allocate space to put the pixels being received and converted
+                this.frameData = new ushort[depthFrameDescription.Width * depthFrameDescription.Height];
+                this.depthColorPixels = new byte[depthFrameDescription.Width * depthFrameDescription.Height * this.cbytesPerPixel];
+                this.rgbColorPixels = new byte[colorFrameDescription.Width * colorFrameDescription.Height * this.bytesPerPixel];
+
+                // create the bitmap to display
+                this.depthBitmap = new WriteableBitmap(depthFrameDescription.Width, depthFrameDescription.Height, 96.0, 96.0, PixelFormats.Bgr32, null);
+                this.colorBitmap = new WriteableBitmap(colorFrameDescription.Width, colorFrameDescription.Height, 96.0, 96.0, PixelFormats.Bgr32, null);
+                int stride = depthFrameDescription.Width * 4;
+                byte[] bits = new byte[depthFrameDescription.Height * stride];
+                for (int i = 0; i < bits.Length; i++)
                 {
-                    this.sensor = potentialSensor;
-                    break;
+                    bits[i] = 122;
                 }
-            }
-
-
-            if (null != this.sensor)
-            {
-
-                this.sensor.DepthStream.Enable(DepthImageFormat.Resolution640x480Fps30);
-                this.sensor.ColorStream.Enable(ColorImageFormat.RgbResolution640x480Fps30);
-                this.colorPixels = new byte[this.sensor.ColorStream.FramePixelDataLength];
-                this.depthPixels = new DepthImagePixel[this.sensor.DepthStream.FramePixelDataLength];
-                this.colorBitmap = new WriteableBitmap(this.sensor.ColorStream.FrameWidth, this.sensor.ColorStream.FrameHeight, 96.0, 96.0, PixelFormats.Bgr32, null);
-                this.depthBitmap = new WriteableBitmap(this.sensor.DepthStream.FrameWidth, this.sensor.DepthStream.FrameHeight, 96.0, 96.0, PixelFormats.Bgr32, null);
+                //create bitmap source to display
+                this.depthbmSource = BitmapSource.Create(depthFrameDescription.Width, depthFrameDescription.Height, 96.0, 96.0, PixelFormats.Bgr32, null, bits, stride);
                 this.colorImg.Source = this.colorBitmap;
 
-                this.sensor.AllFramesReady += this.sensor_AllFramesReady;
+                if (this.reader != null)
+                {
+                    this.reader.MultiSourceFrameArrived += reader_MultiSourceFrameArrived;
 
-                try
-                {
-                    this.sensor.Start();
-                }
-                catch (IOException)
-                {
-                    this.sensor = null;
                 }
             }
-
-            if (null == this.sensor)
+            else
             {
+                // on failure, set the status text
                 this.outputViewbox.Visibility = System.Windows.Visibility.Collapsed;
                 this.txtError.Visibility = System.Windows.Visibility.Visible;
-                this.txtInfo.Text = "No Kinect Found";
+                this.txtInfo.Text = Properties.Resources.NoSensorStatusText;
 
             }
-
         }
 
-        private void sensor_AllFramesReady(object sender, AllFramesReadyEventArgs e)
+        void reader_MultiSourceFrameArrived(object sender, MultiSourceFrameArrivedEventArgs e)
         {
-            BitmapSource depthBmp = null;
             blobCount = 0;
+            BitmapSource depthBmp = null;
+            MultiSourceFrameReference multiReference = e.FrameReference;
 
-            using (ColorImageFrame colorFrame = e.OpenColorImageFrame())
+            try
             {
-                using (DepthImageFrame depthFrame = e.OpenDepthImageFrame())
+                MultiSourceFrame multiFrame = multiReference.AcquireFrame();
+
+                if (multiFrame != null)
                 {
-                    if (depthFrame != null)
+                    using (multiFrame)
                     {
+                        DepthFrame depthFrame = multiFrame.DepthFrameReference.AcquireFrame();
+                        ColorFrame colorFrame = multiFrame.ColorFrameReference.AcquireFrame();
 
-                        blobCount = 0;
 
-                        depthBmp = depthFrame.SliceDepthImage((int)sliderMin.Value, (int)sliderMax.Value);
-
-                        Image<Bgr, Byte> openCVImg = new Image<Bgr, byte>(depthBmp.ToBitmap());
-                        Image<Gray, byte> gray_image = openCVImg.Convert<Gray, byte>();
-
-                        using (MemStorage stor = new MemStorage())
+                        if (depthFrame != null)
                         {
-                            //Find contours with no holes try CV_RETR_EXTERNAL to find holes
-                            Contour<System.Drawing.Point> contours = gray_image.FindContours(
-                             Emgu.CV.CvEnum.CHAIN_APPROX_METHOD.CV_CHAIN_APPROX_SIMPLE,
-                             Emgu.CV.CvEnum.RETR_TYPE.CV_RETR_EXTERNAL,
-                             stor);
 
-                            for (int i = 0; contours != null; contours = contours.HNext)
+                            blobCount = 0;
+
+                            depthBmp = multiFrame.SliceDepthImage((int)sliderMin.Value, (int)sliderMax.Value);
+
+                            Image<Bgr, Byte> openCVImg = new Image<Bgr, byte>(depthBmp.ToBitmap());
+                            Image<Gray, byte> gray_image = openCVImg.Convert<Gray, byte>();
+
+                            using (MemStorage stor = new MemStorage())
                             {
-                                i++;
+                                //Find contours with no holes try CV_RETR_EXTERNAL to find holes
+                                Contour<System.Drawing.Point> contours = gray_image.FindContours(
+                                 Emgu.CV.CvEnum.CHAIN_APPROX_METHOD.CV_CHAIN_APPROX_SIMPLE,
+                                 Emgu.CV.CvEnum.RETR_TYPE.CV_RETR_EXTERNAL,
+                                 stor);
 
-                                if ((contours.Area > Math.Pow(sliderMinSize.Value, 2)) && (contours.Area < Math.Pow(sliderMaxSize.Value, 2)))
+                                for (int i = 0; contours != null; contours = contours.HNext)
                                 {
-                                    MCvBox2D box = contours.GetMinAreaRect();
-                                    openCVImg.Draw(box, new Bgr(System.Drawing.Color.Red), 2);
-                                    blobCount++;
+                                    i++;
+
+                                    if ((contours.Area > Math.Pow(sliderMinSize.Value, 2)) && (contours.Area < Math.Pow(sliderMaxSize.Value, 2)))
+                                    {
+                                        MCvBox2D box = contours.GetMinAreaRect();
+                                        openCVImg.Draw(box, new Bgr(System.Drawing.Color.Red), 2);
+                                        blobCount++;
+                                    }
                                 }
                             }
+
+                            this.outImg.Source = ImageHelpers.ToBitmapSource(openCVImg);
+                            txtBlobCount.Text = blobCount.ToString();
                         }
 
-                        this.outImg.Source = ImageHelpers.ToBitmapSource(openCVImg);
-                        txtBlobCount.Text = blobCount.ToString();
+                        if (colorFrame != null)
+                        {
+
+                            if (colorFrame.RawColorImageFormat == ColorImageFormat.Bgra)
+                            {
+                                colorFrame.CopyRawFrameDataToArray(this.rgbColorPixels);
+                            }
+                            else
+                            {
+                                colorFrame.CopyConvertedFrameDataToArray(this.rgbColorPixels, ColorImageFormat.Bgra);
+                            }
+                            
+                            this.colorBitmap.WritePixels(
+                                new Int32Rect(0, 0, this.colorBitmap.PixelWidth, this.colorBitmap.PixelHeight),
+                                this.rgbColorPixels,
+                                this.colorBitmap.PixelWidth * sizeof(int),
+                                0);
+                        }
+                        
                     }
-                }
 
-
-                if (colorFrame != null)
-                {
-
-                    colorFrame.CopyPixelDataTo(this.colorPixels);
-                    this.colorBitmap.WritePixels(
-                        new Int32Rect(0, 0, this.colorBitmap.PixelWidth, this.colorBitmap.PixelHeight),
-                        this.colorPixels,
-                        this.colorBitmap.PixelWidth * sizeof(int),
-                        0);
-
-                }
+                }               
+            }
+            catch (Exception err)
+            {
+                // ignore if the frame is no longer available
+                Console.WriteLine(err);
             }
         }
-
 
         #region Window Stuff
         void MainWindow_MouseDown(object sender, MouseButtonEventArgs e)
@@ -156,12 +205,24 @@ namespace Kinect2Depth
             this.DragMove();
         }
 
-
-        void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        /// <summary>
+        /// Execute shutdown tasks
+        /// </summary>
+        /// <param name="sender">object sending the event</param>
+        /// <param name="e">event arguments</param>
+        private void MainWindow_Closing(object sender, CancelEventArgs e)
         {
-            if (null != this.sensor)
+            if (this.reader != null)
             {
-                this.sensor.Stop();
+                // DepthFrameReder is IDisposable
+                this.reader.Dispose();
+                this.reader = null;
+            }
+
+            if (this.kinectSensor != null)
+            {
+                this.kinectSensor.Close();
+                this.kinectSensor = null;
             }
         }
 
