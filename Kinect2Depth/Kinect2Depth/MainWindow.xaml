@@ -19,7 +19,7 @@
             </Button>
 
             <Image Source="Images\Status.png" Stretch="None" HorizontalAlignment="Left"  Grid.Column="1"/>
-            <TextBlock x:Name="title" Text="Kinect + OpenCV " HorizontalAlignment="Left" Margin="65,26,0,26" VerticalAlignment="Center" FontFamily="{StaticResource KinectFontLight}" Foreground="{StaticResource TitleForegroundBrush}" FontSize="{StaticResource HeaderFontSize}" Grid.Column="1"  />
+            <TextBlock x:Name="title" Text="Kinect2 + OpenCV " HorizontalAlignment="Left" Margin="65,26,0,26" VerticalAlignment="Center" FontFamily="{StaticResource KinectFontLight}" Foreground="{StaticResource TitleForegroundBrush}" FontSize="{StaticResource HeaderFontSize}" Grid.Column="1"  />
             <Rectangle Fill="#666" Grid.Row="1" Margin="15 0 10 15" Grid.ColumnSpan="2" />
             <TextBlock x:Name="txtError" Grid.Row="1" Text="No Kinect Found" Visibility="Collapsed" FontFamily="{StaticResource KinectFontLight}" Foreground="#ccc" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center" Grid.ColumnSpan="2"/>
 

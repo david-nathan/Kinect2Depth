@@ -1,4 +1,4 @@
 Kinect2Depth
 ============
 
-Use OpenCV for object tracking
+Uses OpenCV for blob tracking. Uses upper and lower threshold on depth image along with contour finding OpenCV algorithm.  

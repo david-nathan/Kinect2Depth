@@ -79,11 +79,11 @@ namespace Kinect2Depth.Properties {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to .
+        ///   Looks up a localized string similar to FPS = {0:N1} Time = {1}.
         /// </summary>
-        internal static string String1 {
+        internal static string StandardStatusTextFormat {
             get {
-                return ResourceManager.GetString("String1", resourceCulture);
+                return ResourceManager.GetString("StandardStatusTextFormat", resourceCulture);
             }
         }
     }

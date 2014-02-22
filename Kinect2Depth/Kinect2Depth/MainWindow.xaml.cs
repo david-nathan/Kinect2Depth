@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -42,12 +43,30 @@ namespace Kinect2Depth
         private readonly int bytesPerPixel = (PixelFormats.Bgr32.BitsPerPixel + 7) / 8;
 
         private BitmapSource depthbmSource = null;
-        private BitmapSource colorbmSource = null;
-
         private MultiSourceFrameReader reader = null;
         private ushort[] frameData = null;
         private byte[] depthColorPixels = null;
         private byte[] rgbColorPixels = null;
+
+        /// <summary>
+        /// The time of the first frame received
+        /// </summary>
+        private long startTime = 0;
+
+        /// <summary>
+        /// Next time to update FPS/frame time status
+        /// </summary>
+        private DateTime nextStatusUpdate = DateTime.MinValue;
+
+        /// <summary>
+        /// Number of frames since last FPS/frame time status
+        /// </summary>
+        private uint framesSinceUpdate = 0;
+
+        /// <summary>
+        /// Timer for FPS calculation
+        /// </summary>
+        private Stopwatch stopwatch = null;
 
         int blobCount = 0;
 
@@ -58,8 +77,10 @@ namespace Kinect2Depth
             this.InitializeComponent();
             this.Loaded += MainWindow_Loaded;
             this.Closing += MainWindow_Closing;
-            this.MouseDown += MainWindow_MouseDown;           
+            this.MouseDown += MainWindow_MouseDown;
         }
+
+
 
 
         /// <summary>
@@ -69,6 +90,9 @@ namespace Kinect2Depth
         /// <param name="e">event arguments</param>
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            // create a stopwatch for FPS calculation
+            this.stopwatch = new Stopwatch();
+            
             // Only one sensor currently supported
             this.kinectSensor = KinectSensor.Default;
 
@@ -80,8 +104,7 @@ namespace Kinect2Depth
                 // open the sensor
                 this.kinectSensor.Open();
 
-                this.reader = this.kinectSensor.OpenMultiSourceFrameReader(FrameSourceTypes.Depth | FrameSourceTypes.Color | FrameSourceTypes.BodyIndex);
-
+                this.reader = this.kinectSensor.OpenMultiSourceFrameReader(FrameSourceTypes.Depth | FrameSourceTypes.Color); 
                 // allocate space to put the pixels being received and converted
                 this.frameData = new ushort[depthFrameDescription.Width * depthFrameDescription.Height];
                 this.depthColorPixels = new byte[depthFrameDescription.Width * depthFrameDescription.Height * this.cbytesPerPixel];
@@ -103,8 +126,9 @@ namespace Kinect2Depth
                 if (this.reader != null)
                 {
                     this.reader.MultiSourceFrameArrived += reader_MultiSourceFrameArrived;
-
+                   
                 }
+                      
             }
             else
             {
@@ -122,6 +146,11 @@ namespace Kinect2Depth
             BitmapSource depthBmp = null;
             MultiSourceFrameReference multiReference = e.FrameReference;
 
+            if (this.startTime == 0)
+            {
+                this.startTime = multiReference.AcquireFrame().DepthFrameReference.RelativeTime;
+            }
+
             try
             {
                 MultiSourceFrame multiFrame = multiReference.AcquireFrame();
@@ -136,60 +165,93 @@ namespace Kinect2Depth
 
                         if (depthFrame != null)
                         {
-
-                            blobCount = 0;
-
-                            depthBmp = multiFrame.SliceDepthImage((int)sliderMin.Value, (int)sliderMax.Value);
-
-                            Image<Bgr, Byte> openCVImg = new Image<Bgr, byte>(depthBmp.ToBitmap());
-                            Image<Gray, byte> gray_image = openCVImg.Convert<Gray, byte>();
-
-                            using (MemStorage stor = new MemStorage())
+                            using (depthFrame)
                             {
-                                //Find contours with no holes try CV_RETR_EXTERNAL to find holes
-                                Contour<System.Drawing.Point> contours = gray_image.FindContours(
-                                 Emgu.CV.CvEnum.CHAIN_APPROX_METHOD.CV_CHAIN_APPROX_SIMPLE,
-                                 Emgu.CV.CvEnum.RETR_TYPE.CV_RETR_EXTERNAL,
-                                 stor);
 
-                                for (int i = 0; contours != null; contours = contours.HNext)
-                                {
-                                    i++;
+                                    blobCount = 0;
+                                    this.framesSinceUpdate++;
 
-                                    if ((contours.Area > Math.Pow(sliderMinSize.Value, 2)) && (contours.Area < Math.Pow(sliderMaxSize.Value, 2)))
+                                    // update status unless last message is sticky for a while
+                                    if (DateTime.Now >= this.nextStatusUpdate)
                                     {
-                                        MCvBox2D box = contours.GetMinAreaRect();
-                                        openCVImg.Draw(box, new Bgr(System.Drawing.Color.Red), 2);
-                                        blobCount++;
+                                        // calcuate fps based on last frame received
+                                        double fps = 0.0;
+
+                                        if (this.stopwatch.IsRunning)
+                                        {
+                                            this.stopwatch.Stop();
+                                            fps = this.framesSinceUpdate / this.stopwatch.Elapsed.TotalSeconds;
+                                            this.stopwatch.Reset();
+                                        }
+
+                                        this.nextStatusUpdate = DateTime.Now + TimeSpan.FromSeconds(1);
+                                        this.txtInfo.Text = string.Format(Properties.Resources.StandardStatusTextFormat, fps, multiFrame.DepthFrameReference.RelativeTime - this.startTime);
                                     }
-                                }
-                            }
 
-                            this.outImg.Source = ImageHelpers.ToBitmapSource(openCVImg);
-                            txtBlobCount.Text = blobCount.ToString();
+                                    if (!this.stopwatch.IsRunning)
+                                    {
+                                        this.framesSinceUpdate = 0;
+                                        this.stopwatch.Start();
+                                    }
+
+
+                                    // Depth threshold for image    
+                                    depthBmp = multiFrame.SliceDepthImage((int)sliderMin.Value, (int)sliderMax.Value);
+                                    
+                                    // Setup openCV data structures
+                                    Image<Bgr, Byte> openCVImg = new Image<Bgr, byte>(depthBmp.ToBitmap());
+                                    Image<Gray, byte> gray_image = openCVImg.Convert<Gray, byte>();
+
+                                    using (MemStorage stor = new MemStorage())
+                                    {
+                                        //Find contours with no holes try CV_RETR_EXTERNAL to find holes
+                                        Contour<System.Drawing.Point> contours = gray_image.FindContours(
+                                         Emgu.CV.CvEnum.CHAIN_APPROX_METHOD.CV_CHAIN_APPROX_SIMPLE,
+                                         Emgu.CV.CvEnum.RETR_TYPE.CV_RETR_EXTERNAL,
+                                         stor);
+
+                                        for (int i = 0; contours != null; contours = contours.HNext)
+                                        {
+                                            i++;
+
+                                            if ((contours.Area > Math.Pow(sliderMinSize.Value, 2)) && (contours.Area < Math.Pow(sliderMaxSize.Value, 2)))
+                                            {
+                                                MCvBox2D box = contours.GetMinAreaRect();
+                                                openCVImg.Draw(box, new Bgr(System.Drawing.Color.Red), 2);
+                                                blobCount++;
+                                            }
+                                        }
+                                    }
+
+                                    // Display Depth image with threholds as color image
+                                    this.outImg.Source = ImageHelpers.ToBitmapSource(openCVImg);
+                                    txtBlobCount.Text = blobCount.ToString();
+
+                            }
                         }
 
-                        if (colorFrame != null)
+                        // Convert Color frame to bitmap
+                        if(colorFrame != null)
                         {
+                            using(colorFrame)
+                            {                                   
+                                    if (colorFrame.RawColorImageFormat == ColorImageFormat.Bgra)
+                                    {
+                                        colorFrame.CopyRawFrameDataToArray(this.rgbColorPixels);
+                                    }
+                                    else
+                                    {
+                                        colorFrame.CopyConvertedFrameDataToArray(this.rgbColorPixels, ColorImageFormat.Bgra);
+                                    }
 
-                            if (colorFrame.RawColorImageFormat == ColorImageFormat.Bgra)
-                            {
-                                colorFrame.CopyRawFrameDataToArray(this.rgbColorPixels);
+                                    this.colorBitmap.WritePixels(
+                                        new Int32Rect(0, 0, this.colorBitmap.PixelWidth, this.colorBitmap.PixelHeight),
+                                        this.rgbColorPixels,
+                                        this.colorBitmap.PixelWidth * sizeof(int),
+                                        0);
                             }
-                            else
-                            {
-                                colorFrame.CopyConvertedFrameDataToArray(this.rgbColorPixels, ColorImageFormat.Bgra);
-                            }
-                            
-                            this.colorBitmap.WritePixels(
-                                new Int32Rect(0, 0, this.colorBitmap.PixelWidth, this.colorBitmap.PixelHeight),
-                                this.rgbColorPixels,
-                                this.colorBitmap.PixelWidth * sizeof(int),
-                                0);
-                        }
-                        
+                        }                       
                     }
-
                 }               
             }
             catch (Exception err)
@@ -200,11 +262,6 @@ namespace Kinect2Depth
         }
 
         #region Window Stuff
-        void MainWindow_MouseDown(object sender, MouseButtonEventArgs e)
-        {
-            this.DragMove();
-        }
-
         /// <summary>
         /// Execute shutdown tasks
         /// </summary>
@@ -224,6 +281,11 @@ namespace Kinect2Depth
                 this.kinectSensor.Close();
                 this.kinectSensor = null;
             }
+        }
+
+        void MainWindow_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            this.DragMove();
         }
 
         private void CloseBtnClick(object sender, RoutedEventArgs e)
